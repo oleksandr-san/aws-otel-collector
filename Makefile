@@ -33,7 +33,7 @@ LDFLAGS=-ldflags "-s -w -X $(BUILD_INFO_IMPORT_PATH).GitHash=$(GIT_SHA) \
 
 GOOS=$(shell go env GOOS)
 GOARCH=$(shell go env GOARCH)
-DOCKER_NAMESPACE=amazon
+DOCKER_NAMESPACE=profisealabs
 COMPONENT=awscollector
 TOOLS_MOD_DIR := $(abspath ./tools/workflow/linters)
 TOOLS_BIN_DIR := $(abspath ./bin)
@@ -74,7 +74,7 @@ dependabot-check: install-dbotconf
 
 .PHONY: dependabot-generate
 dependabot-generate: install-dbotconf
-	@$(DBOTCONF) generate > $(DEPENDABOT_CONFIG); 
+	@$(DBOTCONF) generate > $(DEPENDABOT_CONFIG);
 
 .PHONY: build
 build: install-tools golint
@@ -121,9 +121,8 @@ package-deb: build
 	ARCH=amd64 DEST=build/packages/debian/amd64 tools/packaging/debian/create_deb.sh
 	ARCH=arm64 DEST=build/packages/debian/arm64 tools/packaging/debian/create_deb.sh
 
-.PHONY: docker-build
-docker-build: amd64-build amd64-build-healthcheck
-	docker buildx build --platform linux/amd64 --build-arg BUILDMODE=copy --load -t $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION) -f ./cmd/$(COMPONENT)/Dockerfile .
+docker-build-amd64: amd64-build amd64-build-healthcheck
+	docker buildx build --platform linux/amd64 --build-arg BUILDMODE=copy --load -t $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)-amd64 -f ./cmd/$(COMPONENT)/Dockerfile .
 
 .PHONY: amd64-build-healthcheck
 amd64-build-healthcheck: install-tools golint
@@ -131,7 +130,7 @@ amd64-build-healthcheck: install-tools golint
 
 .PHONY: docker-build-arm
 docker-build-arm: arm64-build arm64-build-healthcheck
-	docker buildx build --platform linux/arm64 --build-arg BUILDMODE=copy --load -t $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION) -f ./cmd/$(COMPONENT)/Dockerfile .
+	docker buildx build --platform linux/arm64 --build-arg BUILDMODE=copy --load -t $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)-arm64 -f ./cmd/$(COMPONENT)/Dockerfile .
 
 .PHONY: arm64-build-healthcheck
 arm64-build-healthcheck: install-tools golint
@@ -141,9 +140,23 @@ arm64-build-healthcheck: install-tools golint
 windows-build-healthcheck: install-tools golint
 	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o ./build/windows/amd64/healthcheck ./cmd/healthcheck
 
+.PHONY: docker-build
+docker-build: docker-build-amd64 docker-build-arm
+
 .PHONY: docker-push
 docker-push:
-	docker push $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)
+	docker push $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)-amd64
+	docker push $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)-arm64
+	docker manifest create $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION) \
+		--amend $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)-amd64 \
+  	--amend $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)-arm64
+	docker manifest push $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)
+
+docker-push-latest:
+	docker manifest create $(DOCKER_NAMESPACE)/$(COMPONENT):latest \
+		--amend $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)-amd64 \
+  	--amend $(DOCKER_NAMESPACE)/$(COMPONENT):$(VERSION)-arm64
+	docker manifest push $(DOCKER_NAMESPACE)/$(COMPONENT):latest
 
 .PHONY: docker-run
 docker-run:
